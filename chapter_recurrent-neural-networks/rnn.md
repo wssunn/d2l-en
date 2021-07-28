@@ -149,16 +149,9 @@ import tensorflow as tf
 ```
 
 ```{.python .input}
-#@tab mxnet, pytorch
+#@tab all
 X, W_xh = d2l.normal(0, 1, (3, 1)), d2l.normal(0, 1, (1, 4))
 H, W_hh = d2l.normal(0, 1, (3, 4)), d2l.normal(0, 1, (4, 4))
-d2l.matmul(X, W_xh) + d2l.matmul(H, W_hh)
-```
-
-```{.python .input}
-#@tab tensorflow
-X, W_xh = d2l.normal((3, 1), 0, 1), d2l.normal((1, 4), 0, 1)
-H, W_hh = d2l.normal((3, 4), 0, 1), d2l.normal((4, 4), 0, 1)
 d2l.matmul(X, W_xh) + d2l.matmul(H, W_hh)
 ```
 

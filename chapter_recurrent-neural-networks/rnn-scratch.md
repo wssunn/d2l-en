@@ -3,10 +3,7 @@
 
 In this section we will implement an RNN
 from scratch
-for a character-level language model,
-according to our descriptions
-in :numref:`sec_rnn`.
-Such a model
+for a character-level language model that 
 will be trained on H. G. Wells' *The Time Machine*.
 As before, we start by reading the dataset first, which is introduced in :numref:`sec_language_model`.
 
@@ -18,7 +15,7 @@ from mxnet import autograd, gluon, np, npx
 npx.set_np()
 ```
 
-```{.python .input}
+```{.python .input  n=3}
 #@tab pytorch
 %matplotlib inline
 from d2l import torch as d2l
@@ -36,16 +33,10 @@ import math
 import tensorflow as tf
 ```
 
-```{.python .input}
+```{.python .input  n=2}
 #@tab all
 batch_size, num_steps = 32, 35
 train_iter, vocab = d2l.load_data_time_machine(batch_size, num_steps)
-```
-
-```{.python .input}
-#@tab tensorflow
-train_random_iter, vocab_random_iter = d2l.load_data_time_machine(
-    batch_size, num_steps, use_random_iter=True)
 ```
 
 ## [**One-Hot Encoding**]
@@ -58,22 +49,13 @@ The easiest representation is called *one-hot encoding*,
 which is introduced
 in :numref:`subsec_classification-problem`.
 
-In a nutshell, we map each index to a different unit vector: assume that the number of different tokens in the vocabulary is $N$ (`len(vocab)`) and the token indices range from $0$ to $N-1$.
+In a nutshell, we map each index to a different unit vector: assume that the number of different tokens in the vocabulary is $N$, i.e., `len(vocab)`, and the token indices range from $0$ to $N-1$.
 If the index of a token is the integer $i$, then we create a vector of all 0s with a length of $N$ and set the element at position $i$ to 1.
 This vector is the one-hot vector of the original token. The one-hot vectors with indices 0 and 2 are shown below.
 
 ```{.python .input}
-npx.one_hot(np.array([0, 2]), len(vocab))
-```
-
-```{.python .input}
-#@tab pytorch
-F.one_hot(torch.tensor([0, 2]), len(vocab))
-```
-
-```{.python .input}
-#@tab tensorflow
-tf.one_hot(tf.constant([0, 2]), len(vocab))
+#@tab all
+d2l.one_hot(d2l.tensor([0, 2]), 8)
 ```
 
 (**The shape of the minibatch**) that we sample each time (**is (batch size, number of time steps).
@@ -88,20 +70,9 @@ for updating hidden states of a minibatch,
 time step by time step.
 
 ```{.python .input}
+#@tab all
 X = d2l.reshape(d2l.arange(10), (2, 5))
-npx.one_hot(X.T, 28).shape
-```
-
-```{.python .input}
-#@tab pytorch
-X = d2l.reshape(d2l.arange(10), (2, 5))
-F.one_hot(X.T, 28).shape
-```
-
-```{.python .input}
-#@tab tensorflow
-X = d2l.reshape(d2l.arange(10), (2, 5))
-tf.one_hot(tf.transpose(X), 28).shape
+d2l.one_hot(d2l.transpose(X), 28).shape
 ```
 
 ## Initializing the Model Parameters
@@ -115,35 +86,11 @@ Hence, they have the same dimension,
 which is equal to the vocabulary size.
 
 ```{.python .input}
+#@tab mxnet, pytorch
 def get_params(vocab_size, num_hiddens, device):
     num_inputs = num_outputs = vocab_size
-
-    def normal(shape):
-        return np.random.normal(scale=0.01, size=shape, ctx=device)
-
     # Hidden layer parameters
-    W_xh = normal((num_inputs, num_hiddens))
-    W_hh = normal((num_hiddens, num_hiddens))
-    b_h = d2l.zeros(num_hiddens, ctx=device)
-    # Output layer parameters
-    W_hq = normal((num_hiddens, num_outputs))
-    b_q = d2l.zeros(num_outputs, ctx=device)
-    # Attach gradients
-    params = [W_xh, W_hh, b_h, W_hq, b_q]
-    for param in params:
-        param.attach_grad()
-    return params
-```
-
-```{.python .input}
-#@tab pytorch
-def get_params(vocab_size, num_hiddens, device):
-    num_inputs = num_outputs = vocab_size
-
-    def normal(shape):
-        return torch.randn(size=shape, device=device) * 0.01
-
-    # Hidden layer parameters
+    normal = lambda shape: d2l.randn(size=shape, device=device) * 0.01
     W_xh = normal((num_inputs, num_hiddens))
     W_hh = normal((num_hiddens, num_hiddens))
     b_h = d2l.zeros(num_hiddens, device=device)
@@ -153,7 +100,7 @@ def get_params(vocab_size, num_hiddens, device):
     # Attach gradients
     params = [W_xh, W_hh, b_h, W_hq, b_q]
     for param in params:
-        param.requires_grad_(True)
+        d2l.requires_grad(param)
     return params
 ```
 
@@ -161,9 +108,10 @@ def get_params(vocab_size, num_hiddens, device):
 #@tab tensorflow
 def get_params(vocab_size, num_hiddens):
     num_inputs = num_outputs = vocab_size
-    
+
     def normal(shape):
-        return d2l.normal(shape=shape,stddev=0.01,mean=0,dtype=tf.float32)
+        return tf.random.normal(
+            shape=shape,stddev=0.01,mean=0,dtype=tf.float32)
 
     # Hidden layer parameters
     W_xh = tf.Variable(normal((num_inputs, num_hiddens)), dtype=tf.float32)
@@ -186,12 +134,7 @@ Using tuples makes it easier to handle situations where the hidden state contain
 which we will encounter in later sections.
 
 ```{.python .input}
-def init_rnn_state(batch_size, num_hiddens, device):
-    return (d2l.zeros((batch_size, num_hiddens), ctx=device), )
-```
-
-```{.python .input}
-#@tab pytorch
+#@tab mxnet, pytorch
 def init_rnn_state(batch_size, num_hiddens, device):
     return (d2l.zeros((batch_size, num_hiddens), device=device), )
 ```
@@ -217,21 +160,7 @@ mean value of the $\tanh$ function is 0, when the elements are uniformly
 distributed over the real numbers.
 
 ```{.python .input}
-def rnn(inputs, state, params):
-    # Shape of `inputs`: (`num_steps`, `batch_size`, `vocab_size`)
-    W_xh, W_hh, b_h, W_hq, b_q = params
-    H, = state
-    outputs = []
-    # Shape of `X`: (`batch_size`, `vocab_size`)
-    for X in inputs:
-        H = np.tanh(np.dot(X, W_xh) + np.dot(H, W_hh) + b_h)
-        Y = np.dot(H, W_hq) + b_q
-        outputs.append(Y)
-    return np.concatenate(outputs, axis=0), (H,)
-```
-
-```{.python .input}
-#@tab pytorch
+#@tab mxnet, pytorch
 def rnn(inputs, state, params):
     # Here `inputs` shape: (`num_steps`, `batch_size`, `vocab_size`)
     W_xh, W_hh, b_h, W_hq, b_q = params
@@ -239,10 +168,10 @@ def rnn(inputs, state, params):
     outputs = []
     # Shape of `X`: (`batch_size`, `vocab_size`)
     for X in inputs:
-        H = torch.tanh(torch.mm(X, W_xh) + torch.mm(H, W_hh) + b_h)
-        Y = torch.mm(H, W_hq) + b_q
+        H = d2l.tanh(d2l.matmul(X, W_xh) + d2l.matmul(H, W_hh) + b_h)
+        Y = d2l.matmul(H, W_hq) + b_q
         outputs.append(Y)
-    return torch.cat(outputs, dim=0), (H,)
+    return d2l.concat(outputs, axis=0), (H,)
 ```
 
 ```{.python .input}
@@ -282,7 +211,7 @@ class RNNModelScratch:  #@save
 ```
 
 ```{.python .input}
-#@tab pytorch
+#@tab mxnet, pytorch
 class RNNModelScratch: #@save
     """A RNN Model implemented from scratch."""
     def __init__(self, vocab_size, num_hiddens, device,
@@ -292,7 +221,7 @@ class RNNModelScratch: #@save
         self.init_state, self.forward_fn = init_state, forward_fn
 
     def __call__(self, X, state):
-        X = F.one_hot(X.T, self.vocab_size).type(torch.float32)
+        X = d2l.one_hot(d2l.transpose(X), self.vocab_size).astype(d2l.float32)
         return self.forward_fn(X, state, self.params)
 
     def begin_state(self, batch_size, device):
@@ -321,22 +250,12 @@ class RNNModelScratch: #@save
 Let us [**check whether the outputs have the correct shapes**], e.g., to ensure that the dimensionality of the hidden state remains unchanged.
 
 ```{.python .input}
-#@tab mxnet
+#@tab mxnet, pytorch
 num_hiddens = 512
 net = RNNModelScratch(len(vocab), num_hiddens, d2l.try_gpu(), get_params,
                       init_rnn_state, rnn)
 state = net.begin_state(X.shape[0], d2l.try_gpu())
-Y, new_state = net(X.as_in_context(d2l.try_gpu()), state)
-Y.shape, len(new_state), new_state[0].shape
-```
-
-```{.python .input}
-#@tab pytorch
-num_hiddens = 512
-net = RNNModelScratch(len(vocab), num_hiddens, d2l.try_gpu(), get_params,
-                      init_rnn_state, rnn)
-state = net.begin_state(X.shape[0], d2l.try_gpu())
-Y, new_state = net(X.to(d2l.try_gpu()), state)
+Y, new_state = net(d2l.to(X, d2l.try_gpu()), state)
 Y.shape, len(new_state), new_state[0].shape
 ```
 
@@ -378,23 +297,7 @@ its initialized value at the beginning.
 So we generate the predicted characters and emit them.
 
 ```{.python .input}
-def predict_ch8(prefix, num_preds, net, vocab, device):  #@save
-    """Generate new characters following the `prefix`."""
-    state = net.begin_state(batch_size=1, ctx=device)
-    outputs = [vocab[prefix[0]]]
-    get_input = lambda: d2l.reshape(
-        d2l.tensor([outputs[-1]], ctx=device), (1, 1))
-    for y in prefix[1:]:  # Warm-up period
-        _, state = net(get_input(), state)
-        outputs.append(vocab[y])
-    for _ in range(num_preds):  # Predict `num_preds` steps
-        y, state = net(get_input(), state)
-        outputs.append(int(y.argmax(axis=1).reshape(1)))
-    return ''.join([vocab.idx_to_token[i] for i in outputs])
-```
-
-```{.python .input}
-#@tab pytorch
+#@tab mxnet, pytorch
 def predict_ch8(prefix, num_preds, net, vocab, device):  #@save
     """Generate new characters following the `prefix`."""
     state = net.begin_state(batch_size=1, device=device)
@@ -587,13 +490,7 @@ def train_epoch_ch8(net, train_iter, loss, updater, device, use_random_iter):
     state, timer = None, d2l.Timer()
     metric = d2l.Accumulator(2)  # Sum of training loss, no. of tokens
     for X, Y in train_iter:
-        if state is None or use_random_iter:
-            # Initialize `state` when either it is the first iteration or
-            # using random sampling
-            state = net.begin_state(batch_size=X.shape[0], ctx=device)
-        else:
-            for s in state:
-                s.detach()
+        state = net.begin_state(batch_size=X.shape[0], device=device)
         y = Y.T.reshape(-1)
         X, y = X.as_in_ctx(device), y.as_in_ctx(device)
         with autograd.record():
@@ -614,19 +511,7 @@ def train_epoch_ch8(net, train_iter, loss, updater, device, use_random_iter):
     state, timer = None, d2l.Timer()
     metric = d2l.Accumulator(2)  # Sum of training loss, no. of tokens
     for X, Y in train_iter:
-        if state is None or use_random_iter:
-            # Initialize `state` when either it is the first iteration or
-            # using random sampling
-            state = net.begin_state(batch_size=X.shape[0], device=device)
-        else:
-            if isinstance(net, nn.Module) and not isinstance(state, tuple):
-                # `state` is a tensor for `nn.GRU`
-                state.detach_()
-            else:
-                # `state` is a tuple of tensors for `nn.LSTM` and
-                # for our custom scratch implementation 
-                for s in state:
-                    s.detach_()
+        state = net.begin_state(batch_size=X.shape[0], device=device)
         y = Y.T.reshape(-1)
         X, y = X.to(device), y.to(device)
         y_hat, state = net(X, state)
@@ -653,10 +538,7 @@ def train_epoch_ch8(net, train_iter, loss, updater, use_random_iter):
     state, timer = None, d2l.Timer()
     metric = d2l.Accumulator(2)  # Sum of training loss, no. of tokens
     for X, Y in train_iter:
-        if state is None or use_random_iter:
-            # Initialize `state` when either it is the first iteration or
-            # using random sampling
-            state = net.begin_state(batch_size=X.shape[0], dtype=tf.float32)
+        state = net.begin_state(batch_size=X.shape[0], dtype=tf.float32)
         with tf.GradientTape(persistent=True) as g:
             y_hat, state = net(X, state)
             y = d2l.reshape(tf.transpose(Y), (-1))
@@ -775,23 +657,6 @@ train_ch8(net, train_iter, vocab, lr, num_epochs, strategy)
 
 [**Finally,
 let us check the results of using the random sampling method.**]
-
-```{.python .input}
-#@tab mxnet,pytorch
-net = RNNModelScratch(len(vocab), num_hiddens, d2l.try_gpu(), get_params,
-                      init_rnn_state, rnn)
-train_ch8(net, train_iter, vocab, lr, num_epochs, d2l.try_gpu(),
-          use_random_iter=True)
-```
-
-```{.python .input}
-#@tab tensorflow
-with strategy.scope():
-    net = RNNModelScratch(len(vocab), num_hiddens, init_rnn_state, rnn,
-                          get_params)
-train_ch8(net, train_iter, vocab_random_iter, lr, num_epochs, strategy,
-          use_random_iter=True)
-```
 
 While implementing the above RNN model from scratch is instructive, it is not convenient.
 In the next section we will see how to improve the RNN model,

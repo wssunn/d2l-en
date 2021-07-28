@@ -15,7 +15,6 @@ import tarfile
 import time
 import zipfile
 from collections import defaultdict
-
 import pandas as pd
 import requests
 from IPython import display
@@ -375,7 +374,6 @@ def download_extract(name, folder=None):
     fp.extractall(base_dir)
     return os.path.join(base_dir, folder) if folder else data_dir
 
-
 def download_all():
     """Download all files in the DATA_HUB."""
     for name in DATA_HUB:
@@ -394,7 +392,6 @@ DATA_HUB['kaggle_house_test'] = (DATA_URL + 'kaggle_house_pred_test.csv',
 def try_gpu(i=0):
     """Return gpu(i) if exists, otherwise return cpu()."""
     return npx.gpu(i) if npx.num_gpus() >= i + 1 else npx.cpu()
-
 
 def try_all_gpus():
     """Return all available GPUs, or [cpu()] if no GPU exists."""
@@ -491,7 +488,6 @@ class Residual(nn.Block):
 d2l.DATA_HUB['time_machine'] = (d2l.DATA_URL + 'timemachine.txt',
                                 '090b5e7e70c295757f55df93cb0a180b9691891a')
 
-
 def read_time_machine():
     """Load the time machine dataset into a list of text lines."""
     with open(d2l.download('time_machine'), 'r') as f:
@@ -554,7 +550,6 @@ class Vocab:
     def token_freqs(self):  # Index for the unknown token
         return self._token_freqs
 
-
 def count_corpus(tokens):
     """Count token frequencies."""
     # Here `tokens` is a 1D list or 2D list
@@ -579,72 +574,33 @@ def load_corpus_time_machine(max_tokens=-1):
 
 
 # Defined in file: ./chapter_recurrent-neural-networks/language-models-and-dataset.md
-def seq_data_iter_random(corpus, batch_size, num_steps):
-    """Generate a minibatch of subsequences using random sampling."""
-    # Start with a random offset (inclusive of `num_steps - 1`) to partition a
-    # sequence
-    corpus = corpus[random.randint(0, num_steps - 1):]
-    # Subtract 1 since we need to account for labels
-    num_subseqs = (len(corpus) - 1) // num_steps
-    # The starting indices for subsequences of length `num_steps`
-    initial_indices = list(range(0, num_subseqs * num_steps, num_steps))
-    # In random sampling, the subsequences from two adjacent random
-    # minibatches during iteration are not necessarily adjacent on the
-    # original sequence
-    random.shuffle(initial_indices)
-
-    def data(pos):
-        # Return a sequence of length `num_steps` starting from `pos`
-        return corpus[pos:pos + num_steps]
-
-    num_batches = num_subseqs // batch_size
-    for i in range(0, batch_size * num_batches, batch_size):
-        # Here, `initial_indices` contains randomized starting indices for
-        # subsequences
-        initial_indices_per_batch = initial_indices[i:i + batch_size]
-        X = [data(j) for j in initial_indices_per_batch]
-        Y = [data(j + 1) for j in initial_indices_per_batch]
-        yield d2l.tensor(X), d2l.tensor(Y)
-
-
-# Defined in file: ./chapter_recurrent-neural-networks/language-models-and-dataset.md
-def seq_data_iter_sequential(corpus, batch_size, num_steps):
-    """Generate a minibatch of subsequences using sequential partitioning."""
-    # Start with a random offset to partition a sequence
-    offset = random.randint(0, num_steps)
-    num_tokens = ((len(corpus) - offset - 1) // batch_size) * batch_size
-    Xs = d2l.tensor(corpus[offset:offset + num_tokens])
-    Ys = d2l.tensor(corpus[offset + 1:offset + 1 + num_tokens])
-    Xs, Ys = Xs.reshape(batch_size, -1), Ys.reshape(batch_size, -1)
-    num_batches = Xs.shape[1] // num_steps
-    for i in range(0, num_steps * num_batches, num_steps):
-        X = Xs[:, i:i + num_steps]
-        Y = Ys[:, i:i + num_steps]
-        yield X, Y
-
-
-# Defined in file: ./chapter_recurrent-neural-networks/language-models-and-dataset.md
 class SeqDataLoader:
-    """An iterator to load sequence data."""
-    def __init__(self, batch_size, num_steps, use_random_iter, max_tokens):
-        if use_random_iter:
-            self.data_iter_fn = d2l.seq_data_iter_random
-        else:
-            self.data_iter_fn = d2l.seq_data_iter_sequential
-        self.corpus, self.vocab = d2l.load_corpus_time_machine(max_tokens)
-        self.batch_size, self.num_steps = batch_size, num_steps
+    """An sequence data iterator generates minibatches by random sampling."""
+    def __init__(self, corpus, batch_size, num_steps):
+        self.corpus, self.b, self.n = corpus, batch_size, num_steps
 
     def __iter__(self):
-        return self.data_iter_fn(self.corpus, self.batch_size, self.num_steps)
+        # Randomly drop d head tokens.
+        corpus = self.corpus[random.randint(0, self.n - 1):]
+        # Subtract 1 since we need to account for labels
+        m = (len(corpus) - 1) // self.n
+        # The starting indices for input sequences.
+        initial_indices = list(range(0, m * self.n, self.n))
+        random.shuffle(initial_indices)
+        for i in range(0, m // self.b):
+            # The randomized starting indices for this minibatch.
+            batch_indicies = initial_indices[i * self.b:(i + 1) * self.b]
+            X = [corpus[j:j + self.n] for j in batch_indicies]
+            Y = [corpus[j + 1:j + 1 + self.n] for j in batch_indicies]
+            yield d2l.tensor(X), d2l.tensor(Y)
 
 
 # Defined in file: ./chapter_recurrent-neural-networks/language-models-and-dataset.md
-def load_data_time_machine(batch_size, num_steps, use_random_iter=False,
-                           max_tokens=10000):
+def load_data_time_machine(batch_size, num_steps, max_tokens=10000):
     """Return the iterator and the vocabulary of the time machine dataset."""
-    data_iter = SeqDataLoader(batch_size, num_steps, use_random_iter,
-                              max_tokens)
-    return data_iter, data_iter.vocab
+    corpus, vocab = d2l.load_corpus_time_machine(max_tokens)
+    data_iter = SeqDataLoader(corpus, batch_size, num_steps)
+    return data_iter, vocab
 
 
 # Defined in file: ./chapter_recurrent-neural-networks/rnn-scratch.md
@@ -665,18 +621,35 @@ class RNNModelScratch:
 
 
 # Defined in file: ./chapter_recurrent-neural-networks/rnn-scratch.md
+class RNNModelScratch:
+    """A RNN Model implemented from scratch."""
+    def __init__(self, vocab_size, num_hiddens, device, get_params,
+                 init_state, forward_fn):
+        self.vocab_size, self.num_hiddens = vocab_size, num_hiddens
+        self.params = get_params(vocab_size, num_hiddens, device)
+        self.init_state, self.forward_fn = init_state, forward_fn
+
+    def __call__(self, X, state):
+        X = d2l.one_hot(d2l.transpose(X), self.vocab_size).astype(d2l.float32)
+        return self.forward_fn(X, state, self.params)
+
+    def begin_state(self, batch_size, device):
+        return self.init_state(batch_size, self.num_hiddens, device)
+
+
+# Defined in file: ./chapter_recurrent-neural-networks/rnn-scratch.md
 def predict_ch8(prefix, num_preds, net, vocab, device):
     """Generate new characters following the `prefix`."""
-    state = net.begin_state(batch_size=1, ctx=device)
+    state = net.begin_state(batch_size=1, device=device)
     outputs = [vocab[prefix[0]]]
-    get_input = lambda: d2l.reshape(d2l.tensor([outputs[-1]], ctx=device),
+    get_input = lambda: d2l.reshape(d2l.tensor([outputs[-1]], device=device),
                                     (1, 1))
     for y in prefix[1:]:  # Warm-up period
         _, state = net(get_input(), state)
         outputs.append(vocab[y])
     for _ in range(num_preds):  # Predict `num_preds` steps
         y, state = net(get_input(), state)
-        outputs.append(int(y.argmax(axis=1).reshape(1)))
+        outputs.append(int(y.argmax(dim=1).reshape(1)))
     return ''.join([vocab.idx_to_token[i] for i in outputs])
 
 
@@ -699,13 +672,7 @@ def train_epoch_ch8(net, train_iter, loss, updater, device, use_random_iter):
     state, timer = None, d2l.Timer()
     metric = d2l.Accumulator(2)  # Sum of training loss, no. of tokens
     for X, Y in train_iter:
-        if state is None or use_random_iter:
-            # Initialize `state` when either it is the first iteration or
-            # using random sampling
-            state = net.begin_state(batch_size=X.shape[0], ctx=device)
-        else:
-            for s in state:
-                s.detach()
+        state = net.begin_state(batch_size=X.shape[0], device=device)
         y = Y.T.reshape(-1)
         X, y = X.as_in_ctx(device), y.as_in_ctx(device)
         with autograd.record():
@@ -770,7 +737,6 @@ class RNNModel(nn.Block):
 # Defined in file: ./chapter_recurrent-modern/machine-translation-and-dataset.md
 d2l.DATA_HUB['fra-eng'] = (d2l.DATA_URL + 'fra-eng.zip',
                            '94646ad1522d915e7b0f9296181140edcf86a4f5')
-
 
 def read_data_nmt():
     """Load the English-French dataset."""
@@ -1030,7 +996,7 @@ def show_heatmaps(matrices, xlabel, ylabel, titles=None, figsize=(2.5, 2.5),
                 ax.set_ylabel(ylabel)
             if titles:
                 ax.set_title(titles[j])
-    fig.colorbar(pcm, ax=axes, shrink=0.6)
+    fig.colorbar(pcm, ax=axes, shrink=0.6);
 
 
 # Defined in file: ./chapter_attention-mechanisms/attention-scoring-functions.md
@@ -1174,7 +1140,6 @@ def transpose_qkv(X, num_heads):
     # `num_hiddens` / `num_heads`)
     return X.reshape(-1, X.shape[2], X.shape[3])
 
-
 def transpose_output(X, num_heads):
     """Reverse the operation of `transpose_qkv`."""
     X = X.reshape(-1, num_heads, X.shape[1], X.shape[2])
@@ -1292,7 +1257,6 @@ def train_2d(trainer, steps=20, f_grad=None):
     print(f'epoch {i + 1}, x1: {float(x1):f}, x2: {float(x2):f}')
     return results
 
-
 def show_trace_2d(f, results):
     """Show the trace of 2D variables during optimization."""
     d2l.set_figsize()
@@ -1307,7 +1271,6 @@ def show_trace_2d(f, results):
 # Defined in file: ./chapter_optimization/minibatch-sgd.md
 d2l.DATA_HUB['airfoil'] = (d2l.DATA_URL + 'airfoil_self_noise.dat',
                            '76e5be1548fd8222e5074cf0faae75edff8cf93f')
-
 
 def get_data_ch11(batch_size=10, n=1500):
     data = np.genfromtxt(d2l.download('airfoil'), dtype=np.float32,
@@ -1504,7 +1467,6 @@ def box_corner_to_center(boxes):
     h = y2 - y1
     boxes = d2l.stack((cx, cy, w, h), axis=-1)
     return boxes
-
 
 def box_center_to_corner(boxes):
     """Convert from (center, width, height) to (upper-left, lower-right)."""
@@ -1844,7 +1806,6 @@ def voc_colormap2label():
                        colormap[2]] = i
     return colormap2label
 
-
 def voc_label_indices(colormap, colormap2label):
     """Map any RGB values in VOC labels to their class indices."""
     colormap = colormap.astype(np.int32)
@@ -1930,7 +1891,6 @@ def copyfile(filename, target_dir):
     os.makedirs(target_dir, exist_ok=True)
     shutil.copy(filename, target_dir)
 
-
 def reorg_train_valid(data_dir, labels, valid_ratio):
     """Split the validation set out of the original training set."""
     # The number of examples of the class that has the fewest examples in the
@@ -1974,7 +1934,6 @@ d2l.DATA_HUB['dog_tiny'] = (d2l.DATA_URL + 'kaggle_dog_tiny.zip',
 # Defined in file: ./chapter_natural-language-processing-pretraining/word-embedding-dataset.md
 d2l.DATA_HUB['ptb'] = (d2l.DATA_URL + 'ptb.zip',
                        '319d85e578af0cdc590547f26231e4e31cdf1e42')
-
 
 def read_ptb():
     """Load the PTB dataset into a list of text lines."""
@@ -2253,7 +2212,6 @@ class BERTModel(nn.Block):
 d2l.DATA_HUB['wikitext-2'] = (
     'https://s3.amazonaws.com/research.metamind.io/wikitext/'
     'wikitext-2-v1.zip', '3c914d17d80b1459be871a5039ac23e752a53cbe')
-
 
 def _read_wiki(data_dir):
     file_name = os.path.join(data_dir, 'wiki.train.tokens')
@@ -2609,7 +2567,6 @@ d2l.DATA_HUB['ml-100k'] = (
     'http://files.grouplens.org/datasets/movielens/ml-100k.zip',
     'cd4dcac4241c8a4ad7badc7ca635da8a69dddb83')
 
-
 def read_data_ml100k():
     data_dir = d2l.download_extract('ml-100k')
     names = ['user_id', 'item_id', 'rating', 'timestamp']
@@ -2914,11 +2871,8 @@ d2l.DATA_HUB['pokemon'] = (d2l.DATA_URL + 'pokemon.zip',
 
 
 # Alias defined in config.ini
-size = lambda a: a.size
-transpose = lambda a: a.T
 
 ones = np.ones
-zeros = np.zeros
 arange = np.arange
 meshgrid = np.meshgrid
 sin = np.sin
@@ -2931,7 +2885,7 @@ exp = np.exp
 log = np.log
 tensor = np.array
 normal = np.random.normal
-rand = np.random.rand
+rand( = np.random.rand(
 matmul = np.dot
 int32 = np.int32
 float32 = np.float32
@@ -2945,4 +2899,18 @@ to = lambda x, *args, **kwargs: x.as_in_context(*args, **kwargs)
 reduce_sum = lambda x, *args, **kwargs: x.sum(*args, **kwargs)
 argmax = lambda x, *args, **kwargs: x.argmax(*args, **kwargs)
 astype = lambda x, *args, **kwargs: x.astype(*args, **kwargs)
+def size(a_1):
+    return a_1.size
+def transpose(a_1):
+    return a_1.T
+def one_hot(a_1, a_2):
+    return npx.one_hot(a_1, a_2)
+def requires_grad(a_1):
+    return a_1.attach_grad()
+def zeros(a_1, device=None):
+    return np.zeros(a_1, ctx=device)
+def randn(size, device=None):
+    return np.random.randn(size=size, ctx=device)
+def tensor(a_1, device=None):
+    return np.tensor(a_1, ctx=device)
 
